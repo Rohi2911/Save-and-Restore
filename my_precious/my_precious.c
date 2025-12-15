@@ -22,13 +22,13 @@
 
 SYSCALL_DEFINE1(my_precious, int, opr)
 {
-        struct task_struct *tsk = current;
-        struct page *new_page = NULL, *old_page = NULL;
-        struct mm_struct *mm = tsk->mm;
+	struct task_struct *tsk = current;
+	struct page *new_page = NULL, *old_page = NULL;
+	struct mm_struct *mm = tsk->mm;
 	struct vm_area_struct *vma;
 	unsigned long address;
 	pte_t *pte = NULL;
-        spinlock_t *ptl = NULL;
+    spinlock_t *ptl = NULL;
 	int err = 0;
 
 	if(opr == 0) {
@@ -93,12 +93,6 @@ SYSCALL_DEFINE1(my_precious, int, opr)
 		
 		tsk->saved_page = new_page;
 
-	/*out_unlock_pte:
-        	if (pte)
-                	pte_unmap_unlock(pte, ptl);
-
-	out_unlock:
-        	up_write(&mm->mmap_lock);*/
 
 	}
 	
@@ -156,7 +150,7 @@ SYSCALL_DEFINE1(my_precious, int, opr)
 		pte_t new_pte = pfn_pte(page_to_pfn(new_page), pte_pgprot(*pte));
         	set_pte_at(mm, address, pte, new_pte);
 
-        	// Flush TLB immediately
+        	// Flush TLB entry
         	flush_tlb_page(vma, address);
 
         	// Update reverse mappings
@@ -165,13 +159,6 @@ SYSCALL_DEFINE1(my_precious, int, opr)
         	put_page(old_page);
 
         	printk(KERN_INFO "Replaced page at %lx with new zeroed page\n", address);
-
-	/*out_unlock_pte:
-        	if (pte)
-                	pte_unmap_unlock(pte, ptl);
-
-	out_unlock:
-        	up_write(&mm->mmap_lock);*/
 
 		}
 
