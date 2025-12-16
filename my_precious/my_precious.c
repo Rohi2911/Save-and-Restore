@@ -20,6 +20,11 @@
 #include <linux/mmzone.h>
 #include <linux/page_ref.h>
 
+enum {
+	SAVE = 0,
+	RESTORE
+};
+
 SYSCALL_DEFINE1(my_precious, int, opr)
 {
 	struct task_struct *tsk = current;
@@ -31,7 +36,7 @@ SYSCALL_DEFINE1(my_precious, int, opr)
     spinlock_t *ptl = NULL;
 	int err = 0;
 
-	if(opr == 0) {
+	if(opr == SAVE) {
 
 
 		down_write(&mm->mmap_lock);
@@ -96,7 +101,7 @@ SYSCALL_DEFINE1(my_precious, int, opr)
 
 	}
 	
-	else if (opr == 1) {
+	else if (opr == RESTORE) {
 		
 		// Allocate new zeroed page
         	new_page = tsk->saved_page;

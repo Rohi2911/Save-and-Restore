@@ -20,90 +20,56 @@
 #include <linux/mmzone.h>
 #include <linux/page_ref.h>
 
-SYSCALL_DEFINE0(test) 
+#define CREATE_TRACE_POINTS
+#include <trace/events/vma.h>
+
+enum {
+	SAVE = 0,
+	RESTORE
+};
+
+static bool is_stack_vma(struct vm_area_struct *vma, struct mm_struct *mm)
 {
+	if (vma->vm_flags & VM_STACK)
+		return true;
 
-	struct task_struct *tsk = current;
-    	struct mm_struct *mm = tsk->mm;
-    	struct vm_area_struct *vma;
-    	struct page *new_page = NULL, *old_page = NULL;
-    	pte_t *pte = NULL;
-    	spinlock_t *ptl = NULL;
-    	unsigned long address;
-    	int err = 0;
+	return vma->vm_start <= mm->start_stack &&
+	       vma->vm_end   >= mm->start_stack;
+}
 
-    	// Allocate new zeroed page
-    	new_page = alloc_pages(GFP_KERNEL | __GFP_ZERO, 0);
-    	if (!new_page)
-        	return -ENOMEM;
+static bool is_heap_vma(struct vm_area_struct *vma, struct mm_struct *mm)
+{
+	return vma->vm_start <= mm->brk &&
+	       vma->vm_end   >= mm->start_brk;
+}
 
-    	down_write(&mm->mmap_lock);
+SYSCALL_DEFINE0(test)
+{
+	struct mm_struct *mm = current->mm;
+	struct vm_area_struct *vma;
 
-    	// Find first anonymous VMA
-    	for (vma = mm->mmap; vma; vma = vma->vm_next) {
-        	if (vma_is_anonymous(vma)) break;
-    	}	
+	if (!mm)
+		return 0;
 
-    	if (!vma) {
-        	printk(KERN_ERR "No anonymous VMA found\n");
-        	err = -EINVAL;
-        	goto out_unlock;
-    	}
+	mmap_read_lock(mm);
 
-    	address = vma->vm_start;
+	for (vma = mm->mmap; vma; vma = vma->vm_next) {
+		const char *type;
 
-    	// Walk page tables
-    	pgd_t *pgd = pgd_offset(mm, address);
-    	if (pgd_none(*pgd) || pgd_bad(*pgd)) goto out_unlock;
+		if (is_stack_vma(vma, mm))
+			type = "stack";
+		else if (is_heap_vma(vma, mm))
+			type = "heap";
+		else
+			type = "other";
 
-    	p4d_t *p4d = p4d_offset(pgd, address);
-    	if (p4d_none(*p4d) || p4d_bad(*p4d)) goto out_unlock;
-
-    	pud_t *pud = pud_offset(p4d, address);
-    	if (pud_none(*pud) || pud_bad(*pud)) goto out_unlock;
-
-    	pmd_t *pmd = pmd_offset(pud, address);
-    	if (pmd_none(*pmd) || pmd_bad(*pmd)) goto out_unlock;
-
-    	pte = pte_offset_map_lock(mm, pmd, address, &ptl);
-    	if (!pte || !pte_present(*pte)) {
-        	printk(KERN_ERR "Invalid or absent PTE\n");
-        	goto out_unlock_pte;
-    	}
-
-    	// Extract old page
-    	old_page = pfn_to_page(pte_pfn(*pte));
-    	if (!old_page) {
-        	printk(KERN_ERR "Failed to retrieve old page\n");
-        	goto out_unlock_pte;
-    	}
-
-    	if (page_address(old_page) && page_address(new_page)) {
-    		memcpy(page_address(new_page), page_address(old_page),	PAGE_SIZE);
-	} else {
-    		printk("One of the page addresses is NULL, skipping memcpy\n");
+		trace_mm_vma_walk(current->pid,
+				  vma->vm_start,
+				  vma->vm_end,
+				  vma->vm_flags,
+				  type);
 	}
 
-    	// Replace PTE
-    	pte_t new_pte = pfn_pte(page_to_pfn(new_page), pte_pgprot(*pte));
-    	set_pte_at(mm, address, pte, new_pte);
-
-    	// Flush TLB immediately
-    	flush_tlb_page(vma, address);
-
-    	// Update reverse mappings
-    	page_add_anon_rmap(new_page, vma, address, 0);
-    	page_remove_rmap(old_page, 0);
-    	put_page(old_page);
-
-    	printk(KERN_INFO "Replaced page at %lx with new zeroed page\n", address);
-
-out_unlock_pte:
-    	if (pte)
-        	pte_unmap_unlock(pte, ptl);
-
-out_unlock:
-    	up_write(&mm->mmap_lock);
-
-    	return err;
+	mmap_read_unlock(mm);
+	return 0;
 }
